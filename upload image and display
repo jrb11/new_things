@@ -1,0 +1,130 @@
+--------------------------------------------    settings.py.  ----------------------------------------------
+
+#For Media
+
+MEDIA_URL='/media/'
+MEDIA_ROOT= BASE_DIR / 'uploads' # uploads is name of folder
+
+
+
+--------------------------------------------    project / urls.py.  ----------------------------------------------
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('', include('blog.urls')),
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+
+--------------------------------------------    blog.html in templates folder (data input)----------------------
+<form action="" method="post" enctype="multipart/form-data"> ############### important
+    {% csrf_token %}
+        <table>
+            <tr>
+                <td> Title</td>
+                <td> <input type="text" name="title"> </td>
+            </tr>
+            <tr>
+                <td> Description</td>
+                <td> <input type="text" name="description"> </td>
+            </tr>
+            <tr>
+                <td>Created On </td>
+                <td> <input type="date" name="created_on"> </td>
+            </tr>
+            <tr>
+                <td>Created By</td>
+                <td> <input type="text" name="created_by"> </td>
+            </tr>
+            <tr>
+                <td>Uplaod ICON</td>
+                <td> <input type="file" name="image"> </td>.  ############### important
+            </tr>
+            <tr>
+                <td> <input type="submit" value="Create"> </td>
+            </tr>
+        </table>
+    </form>
+    
+--------------------------------------------   views.py. ------------------------------------------------------------- 
+    
+    def blog(request):
+    print("in blog")
+    if request.method == 'POST':
+        title = request.POST['title']
+        description = request.POST['description']
+        created_on = request.POST['created_on']
+        created_by = request.POST['created_by']
+        image = request.FILES['image']              ############### important       
+        print("Data Enter")
+
+        user= Blog_Add.objects.create(title=title, description=description, created_on=created_on, created_by=created_by, image=image)
+        print("blog image: ",user.image)
+        user.save()
+
+        print(user)
+		       
+		
+        print('Blog Created')
+		
+        return redirect('blog_read')
+        
+    else:
+        return render(request, 'blog.html')
+        
+ def blog_read(request):
+    blog_data = Blog_Add.objects.all().order_by('-created_on')
+    print("----- blog_read -----",blog_data)
+    return render(request,'blog_read.html',{'blog_data': blog_data})
+    
+--------------------------------------------    blog_read.html in templates folder (data view)----------------------
+
+
+<form method="post">
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Discription</th>
+        <th>Created_ON</th>
+        <th>Created_BY</th>
+        <th>Update</th>
+        <th>Delete</th>
+        <th>Icon</th>
+        
+     
+        <!-- <th>Add</th>
+        <th>Update</th>
+        <th>Delete</th>  -->
+        
+      </tr>
+    </thead>
+    {% if blog_data %}
+    <tbody>
+        {% for i in blog_data %}
+       
+      <tr>
+        <td>{{i.title}}</td>
+        <td>{{i.description}}</td>
+        <!-- Change Date Format According to Requirment  "https://docs.djangoproject.com/en/4.0/ref/templates/builtins/#date"-->
+        <td>{{i.created_on | date:"Y-m-d" }}</td>
+        <td>{{i.created_by}}</td>
+        <td> 
+            <form name="blog_update" action="{% url 'blog_update' i.id %}" method="post">
+            {% csrf_token %}
+                <input type="submit" value="Update">
+            </form>
+        </td>
+        <td> 
+          <form name="blog_delete" action="{% url 'blog_delete' i.id %}" method="post">
+          {% csrf_token %}
+              <input type="submit" value="Delete">
+          </form>
+        </td>
+        
+        <td><img src="{{i.image.url}}" alt="icon" width="50px" width="50px"/></td>.        ############### important  
+   
+       </tr>
+       {% endfor %}
+    </tbody>
+   {% endif %}
+  </table>
+</form>
