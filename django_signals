@@ -1,0 +1,39 @@
+django signals
+
+---- models.py——
+#Import signals
+from Django.db.models.signals import pre_save, post_save
+#Import decorator name - receiver
+from Django.dispatcher import receiver
+
+
+class Profile(models.Model):
+f_name = models.CharField()
+user = ForeignKey(User, on_delete=models.CASCADE)
+
+@receiver(pre_save, sender=User)
+def user_pre_created_handler(*args, **kwagrs):
+		print(“User will be created————“) 
+
+
+@receiver(post_save, sender=User)
+def user_post_created_handler(sender, instance, created, *args, **kwagrs):
+    If created:      # created is boolean so check if created then True otherwise False
+		print(“User will be created————“) 
+
+#if decorator not used at that time need below query for signals
+# pre_save .connect(user_pre_created_handler, sender=User)
+# post_save .connect(user_post_created_handler, sender=User)
+
+
+#—————— use the same as for pre_delete and post_delete
+
+
+
+
+———— views.py ————
+
+{{ form.as_p }} – Render Django Forms as paragraph
+
+
+Django crispy forms——google.com  
