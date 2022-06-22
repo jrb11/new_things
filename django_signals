@@ -37,3 +37,8 @@ def user_post_created_handler(sender, instance, created, *args, **kwagrs):
 
 
 Django crispy forms——google.com  
+
+
+---------
+1. reverse() use in funcation & reverse_lazy() use in class.
+2. reverse() use in string & reverse_lazy() use in object
