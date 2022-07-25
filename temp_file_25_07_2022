@@ -1,0 +1,224 @@
+-------------------------- postman data
+{
+    "created_by": 45,
+    "languages": [
+        {
+            "language_choice":2,
+            "description":"English-4",
+            "medias": [
+                {
+                    "media_name":"i",
+                    "media_uuid":"bbab67b7-b95e-433c-ac46-bb34c0aa43e4",
+                    "media_content_type":"image/jpeg"
+                }
+            ]
+            
+        },
+        {
+            "language_choice":3,
+            "description":"Hindi-4"
+ 
+        }
+    ]
+}
+
+-------------------------- views.py
+def media_move(request):
+
+        #received_image=request.get('image')
+        received_name=request.get('media_name')
+        print('name ----------->',received_name)
+
+        received_uuid = request.get('media_uuid')
+        print('uuid ----------->',received_uuid)
+
+        received_content_type = request.get('media_content_type')
+        print('content type --->',received_content_type)
+
+        received_post_id = request.get('post_id')
+        print('Post Id -------->',received_post_id)
+
+        received_user_id = request.get('user_id')
+        print('User Id -------->',received_user_id)
+
+        post_data = []
+        flag = False
+        # Get user_id value from session_key  # user_login must required to get a value from a session key 'jay_uid'
+        # received_uid = request.session.get('jay_uid')
+        # print('user-id (PostMedia) ->', received_uid)
+        # print("User_ID from session ----------->",uid)
+        #received_uid = received_user_id
+        
+        
+        if received_user_id is not None and received_uuid is not None:
+            try:
+                #new_path = ("path"+'/'+str(received_user_id)+'/'+str(received_post_id))
+                new_path = os.path.join('media', 'post_media_content', str(received_user_id), str(received_post_id))
+                #new_path = os.path.join('media', 'post_media_content', str(received_user_id))
+                print('new_path ------------->', new_path)
+          
+                if os.path.isdir(new_path):
+                    print("path is available")
+                    destination_path = new_path+'/'
+                    print('if_destination_path ---', destination_path)
+
+                else:
+                    print("path is not available, create a new path")
+                    #os.mkdir(new_path)
+                    # from pathlib import Path
+                    # Path("/media/post_media_content/").mkdir(parents=False, exist_ok=True)
+                    # Path("/media/post_media_content/").mkdir(parents=True, exist_ok=True)
+                    os.makedirs(new_path)
+                    destination_path = new_path+'/'
+                    print('else_destination_path --', destination_path)
+
+            except Exception as e:
+                return Response({"response": False, "return_code": "Failed", "result":{}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+                
+        else:
+            #return Response({"response": False, "return_code": "Failed", "result": {"user":"uid not found"}},  status=status.HTTP_404_NOT_FOUND)
+            response = {"flag":flag, "response": False, "return_code": "Failed", "result": {}, "message":errors["no_uuid_user_id"]}
+            return response
+
+        source_path = "temp_location/"
+        #destination_path = "media/images/"
+        dir_list = os.listdir(source_path)
+        print('get_data->',dir_list)
+
+        # for id in dir_list:
+       
+        if received_uuid in dir_list:
+           
+            try:
+                print('id -->' , received_uuid)
+                shutil.move(source_path + received_uuid, destination_path + received_uuid)
+                print('--- UUID MOVE ---')
+                post_data.append(received_uuid)
+                flag = True
+
+            except Exception as e:
+                #transaction.set_rollback(True) # if any error in DB SAVE or UUID MOVE the all transction will rollback().
+                #return Response({"Status":"Failed", "Error":str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+                return Response({"response": False, "return_code": "Failed", "result": {}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            
+            if flag:
+                print('----------------------- Media Move Successfully ----------------------')
+                response = {"flag":flag, "message":post_data }
+                return response
+
+            else:
+                print('------------------------- Media Move Failed --------------------------')
+                response = {"flag":flag, "message":"Media Move Failed"}
+                return response
+                
+        else:
+            #return Response({"response": False, "return_code": "Failed", "result": {}, "message":"No UUID Found"},  status=status.HTTP_404_NOT_FOUND)
+            response = {"flag":flag, "response": False, "return_code": "Failed", "message":"UUID Not Found"}
+            return response
+
+
+# ----- Failed Transaction Directory Remove 25_07_2022
+def dir_remove(user_id, post_id):
+    dir = post_id
+    print('dir -----------', dir)
+    path = os.path.join('media', 'post_media_content', str(user_id))
+    print('path ----------', path)
+    delete_path = os.path.join(path, str(dir))
+    print('delete_path ---', delete_path)
+    shutil.rmtree(delete_path, ignore_errors=False)
+    #os.remove(delete_path)
+    print(f'Deleted Directory Name: {dir}')
+    return True
+
+
+
+
+# ------- Modified 22_07_2022
+class PostCreateViewSet(viewsets.ViewSet):
+    serializer_class = PostSerializer
+
+    @transaction.atomic
+    def create(self, request):
+        data = request.data      # JWT Token (Future)
+        print(data)
+        #try:
+        user_id_data = request.data["created_by"]
+
+        try:
+            user = User.objects.get(id=user_id_data)
+        except Exception as e:
+            return Response({"response": False, "return_code":"user_not_exist",  "result": {}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+        new_post = Post.objects.create(created_by=user)
+        new_post.save()
+
+        user_id = user.id
+        post_id = new_post.id
+
+        language_queryset = request.data["languages"]
+        #print('language_length', language_queryset)
+        for language_data in language_queryset:
+            language_choice = language_data['language_choice']
+            description = language_data['description']
+# ------------------------------------------------- s  
+            # post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+            # post_language_obj.save()
+            try:
+                post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+                post_language_obj.save()
+
+            except Exception as e:
+                transaction.set_rollback(True)
+                return Response({"response": False, "result": {" PostInLanguages Object Create Failed "}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# ------------------------------------------------- e          
+        
+            lang_obj_get_id = post_language_obj.id
+
+            #media_datas = language_data["medias"]
+            #print("received_media's_from_user : ",media_datas)
+
+            if language_data["medias"]:
+                print('-------- Inside Media ---------')
+                media_datas = language_data["medias"]
+                for media_data in media_datas:
+                    print('media_data ------------', media_data)
+                    name = media_data["media_name"]
+                    print('media_name ------------', name)
+                    uuid = media_data["media_uuid"]
+                    print('media_uuid ------------', uuid)
+                    content_type = media_data["media_content_type"]
+                    print('media_content_type ----', content_type)
+    # ------------------------------------------------- s
+                    received_media_move = media_move({"media_name":name,"media_uuid":uuid,"media_content_type":content_type, "post_id":post_id, "user_id":user_id})
+                    print("received_media_move -->",received_media_move)
+    # ------------------------------------------------- e  
+                    # media_url = uuid +'.'+content_type
+                    # print("get_media_url -->",media_url)
+                    
+                    if received_media_move['flag']:     
+                        language_media_obj = LanguageMedia.objects.create(media_in_languages_id=lang_obj_get_id, media_uuid=uuid, media_name=name, media_content_type=content_type, user_id=user_id)
+                        language_media_obj.save()
+                
+                        print("LanguageMedia DB Entry Saved")
+            
+                    else:
+                        transaction.set_rollback(True)
+                        # ------------------------------------------------------------------------- 25_07_2022
+                        path_verify = os.path.join('media', 'post_media_content', str(user_id), str(post_id))
+                        if os.path.isdir(path_verify):
+                            dir = dir_remove(user_id, post_id)
+                            print("Directory Removed --", dir)
+                        # ------------------------------------------------------------------------------------
+                        print("LanguageMedia DB Entry Failed (Because media_move() Failed)")
+                        #return Response({"response": False, "return_code": "Failed", "result": received_media_move['message'], "message":"media_move() Failed"},  status=status.HTTP_400_BAD_REQUEST) 
+
+                #return Response({"response": True, "return_code": "post_create", "result": "LanguageMedia DB Entry Saved", "message": "success"},  status=200)
+
+        
+        return Response({"response": True, "return_code": "post_create", "result": {"send data as a response here..."}, "message": "success"},  status=200)
+
+       
+       
+       
+       
