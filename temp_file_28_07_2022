@@ -1,0 +1,1149 @@
+from distutils.log import error
+from sre_constants import SUCCESS
+from rest_framework import viewsets, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
+from rest_framework.decorators import api_view
+from .common_messages import CommonMessages
+
+
+from .models import *
+from .serializers import LoginSerializer, UserSerializer, RegisterSerializer, VerifyOTPSerializer, CreatePasswordSerializer, ForgotPasswordSerializer, ResentOTPSerializer, UpdateRegisterSerializer, LanguagesSerializer, CategoriesSerializer, UserDetailsSerializer, UpdateProfilePictureSerializer, UpdateCoverPictureSerializer, UpdateUserDetailsSerializer, UpdateCategoriesSerializer, PostSerializer
+from .utils import get_error_message, send_otp
+import uuid
+from django.core.files.storage import FileSystemStorage
+import os
+import shutil
+import magic
+from rest_framework.decorators import api_view
+from django.db import transaction
+from django.contrib import auth
+from django.contrib.auth import login, logout, authenticate
+
+# from .logger import log
+
+success = CommonMessages.success
+errors = CommonMessages.errors
+
+
+class RegistrationView(APIView):
+    serializer_class = RegisterSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            email = serializer.data['email'].lower()
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                user = None
+            if (user is None):
+                serializer.save()
+                user = User.objects.get(email=email)
+            otp = send_otp(email=email)
+            user.password = ""
+            user.otp = otp
+            user.save()
+            return Response({"response": True, "return_code": "register_success", "result": {"id": user.id}, "message": success['register_success']},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            print("error_msg", error_msg)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateRegistrationView(APIView):
+    serializer_class = UpdateRegisterSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            userid = serializer.data['id']
+            email = serializer.data['email'].lower()
+            try:
+                user = User.objects.get(email=email)
+                if(user.id != userid):
+                    return Response({"response": False, "return_code": "msg_something_went_wrong", "result": {}, "message": errors["email_exist"]},  status=status.HTTP_400_BAD_REQUEST)
+            except User.DoesNotExist:
+                user = None
+
+            try:
+                user = User.objects.get(id=userid)
+                user.email = email
+                user.username = email
+                otp = send_otp(email=email)
+                user.otp = otp
+                user.save()
+                return Response({"response": True, "return_code": "email_updated", "result": {}, "message": success["email_updated"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors["user_not_exist"]},  status=status.HTTP_400_BAD_REQUEST)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResentOTPView(APIView):
+    serializer_class = ResentOTPSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            userid = serializer.data['id']
+            try:
+                user = User.objects.get(id=userid)
+                otp = send_otp(email=user.email)
+                user.otp = otp
+                user.save()
+                return Response({"response": True, "return_code": "resent_otp", "result": {}, "message": success["resent_otp"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors['user_not_exist']},  status=status.HTTP_400_BAD_REQUEST)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class VerifyOTPView(APIView):
+    serializer_class = VerifyOTPSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            userid = serializer.data['id']
+            otp = serializer.data['otp']
+            try:
+                user = User.objects.get(id=userid)
+                if user.otp == otp:
+                    user.email_verified = True
+                    user.otp = ""
+                    user.save()
+                    return Response({"response": True, "return_code": "otp_verified", "result": {}, "message": success['otp_verified']},  status=200)
+                else:
+                    return Response({"response": False, "return_code": "wrong_otp", "result": {}, "message": errors['wrong_otp']},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors['user_not_exist']},  status=status.HTTP_400_BAD_REQUEST)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class CreatePasswordView(APIView):
+    serializer_class = CreatePasswordSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            userid = serializer.data['id']
+            password = serializer.data['password']
+            try:
+                user = User.objects.get(id=userid)
+                if user.email_verified == True or user.phone_verified == True:
+                    user.password = password
+                    user.save()
+                    return Response({"response": True, "return_code": "password_created", "result": {}, "message": success["password_created"]},  status=200)
+                else:
+                    return Response({"response": False, "return_code": "msg_verify_account", "result": {}, "message": errors["msg_verify_account"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors["user_not_exist"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class ForgotPasswordView(APIView):
+    serializer_class = ForgotPasswordSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            try:
+                email = serializer.data['email'].lower()
+                user = User.objects.get(email=email)
+                otp = send_otp(email=email)
+                user.otp = otp
+                user.save()
+                return Response({"response": True, "return_code": "forgot_password_success", "result": {"id": user.id}, "message": success["forgot_password_success"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors["user_not_exist"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class LoginView(APIView):
+    serializer_class = LoginSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            try:
+                email = serializer.data['email'].lower()
+                password = serializer.data['password']
+                user = User.objects.get(email=email, password=password)
+                user_id = user.id                     # 18-07-2022
+                request.session['jay_uid'] = user_id  # 18-07-2022
+                print('user-id (LoginView)---->', user_id)
+                print('-------------------------------------------------------')
+                uid = request.session.get('jay_uid')
+                print('uid (LoginView)-------->', uid)
+                user_serializer = UserSerializer(user, context={"request": request})
+                return Response({"response": True, "return_code": "login_success", "result": {"user": user_serializer.data}, "message": success["login_success"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "login_fail", "result": {}, "message": errors["login_fail"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class LanguagesList(APIView):
+    serializer_class = LanguagesSerializer
+
+    def get(self, request, *args, **kwargs):
+        try:
+            all_languages = Languages.objects.all()
+            serializer = self.serializer_class(
+                all_languages, context={"request": request}, many=True)
+            return Response({"response": True, "return_code": "success", "result": {"languages": serializer.data}, "message": success["success"]},  status=200)
+        except Exception as error:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            try:
+                serializer.save()
+                return Response({"response": True, "return_code": "language_added", "result": {}, "message": success["language_added"]},  status=200)
+            except Exception as error:
+                return Response({"response": False, "return_code": "msg_something_went_wrong", "result": {}, "message": error},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class CategoriesList(APIView):
+    serializer_class = CategoriesSerializer
+
+    def get(self, request, *args, **kwargs):
+        try:
+            all_languages = Categories.objects.all()
+            serializer = self.serializer_class(
+                all_languages, context={"request": request}, many=True)
+            return Response({"response": True, "return_code": "success", "result": {"categories": serializer.data}, "message": success["success"]},  status=200)
+        except Exception as error:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            try:
+                serializer.save()
+                return Response({"response": True, "return_code": "categories_added", "result": {}, "message": success["categories_added"]},  status=200)
+            except Exception as error:
+                return Response({"response": False, "return_code": "msg_something_went_wrong", "result": {}, "message": error},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateProfilePicture(APIView):
+    serializer_class = UpdateProfilePictureSerializer
+
+
+class UpdateProfilePicture(APIView):
+    serializer_class = UpdateProfilePictureSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = User.objects.get(id=serializer.data['id'])
+            user_serializer = self.serializer_class(
+                user, context={"request": request})
+            return Response({"response": True, "return_code": "profile_success", "result": {"user": user_serializer.data}, "message": success["profile_success"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateCoverPicture(APIView):
+    serializer_class = UpdateCoverPictureSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = User.objects.get(id=serializer.data['id'])
+            user_serializer = self.serializer_class(
+                user, context={"request": request})
+            return Response({"response": True, "return_code": "cover_success", "result": {"user": user_serializer.data}, "message": success["cover_success"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+# class UpdateCategories(generics.ListCreateAPIView):
+#     serializer_class = UpdateCategoriesSerializer
+#     queryset = Categories.objects.all()
+
+class UpdateCategories(APIView):
+    queryset = Categories.objects.all()
+    serializer_class = UpdateCategoriesSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = User.objects.get(id=serializer.data['id'])
+            user_serializer = self.serializer_class(
+                user, context={"request": request})
+            return Response({"response": True, "return_code": "categories_update_success", "result": {"user": user_serializer.data}, "message": success["categories_update_success"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class UpdateUser(APIView):
+    serializer_class = UpdateUserDetailsSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = User.objects.get(id=serializer.data['id'])
+            user_serializer = UserSerializer(user, context={"request": request})
+            return Response({"response": True, "return_code": "user_update_success", "result": {"user": user_serializer.data}, "message": success["user_update_success"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+class HelloView(viewsets.ViewSet):
+    def list(self, request):
+        return Response("hello sociocouch")
+
+
+class UserView(APIView):
+    serializer_class = UserDetailsSerializer
+
+    def post(self, request, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            try:
+                user = User.objects.get(id=serializer.data['id'])
+                user_serializer = UserSerializer(user, context={"request": request})
+                return Response({"response": True, "return_code": "success", "result": {"user": user_serializer.data}, "message": success["success"]},  status=200)
+            except User.DoesNotExist:
+                user = None
+                return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors["user_not_exist"]},  status=200)
+        else:
+            error_msg = get_error_message(serializer.errors)
+            return Response({"response": False, "return_code": error_msg, "result": {}, "message": errors[error_msg]},  status=status.HTTP_400_BAD_REQUEST)
+
+
+# --------------------------------------------------------------- 23-07-2022 
+
+# ------- Check MIME-
+
+# import mimetypes
+# def check_media_mime_type(media):
+#     mime_type = mimetypes.guess_type(media)
+#     return mime_type
+
+def check_media_mime_type(media):
+    #Find MIME-TYPE using magic 
+    mime_type = magic.from_buffer(media.read(), mime=True)
+    #mime_type = magic.from_buffer(image, mime=True)
+    #mime_type = magic.from_file(image, mime=True)
+    print('mime type -----------',mime_type)
+    return mime_type
+
+# ------- Media Size Limit
+MEDIA_MAX_UPLOAD_SIZE = 5242880 
+
+def check_media_size(media):
+    media_size = media.size
+    if media_size < MEDIA_MAX_UPLOAD_SIZE:
+        return media_size
+
+# --------------------------------------------------------------- media_upload() 23_07_2022 ------------------------------------------------------
+@api_view(['POST',])
+def media_upload(request):
+
+    if request.method == 'POST':
+
+        received_media=request.FILES.getlist('media')  # get medias from file 
+        print('upload image name ---',received_media)
+
+        allowed_mime_types = ['image/jpeg','image/png','image/gif','image/jpg','video/mp4','video/mkv','video/mov','video/avi']
+
+        upload_data = []
+
+        if received_media:
+
+            for media in received_media:
+
+                received_media_mime_type = check_media_mime_type(media)
+                print('received_mime_type --',received_media_mime_type)
+                received_media_size = check_media_size(media)
+                print('received_img_size ---',received_media_size)
+
+                if received_media_mime_type in allowed_mime_types and received_media_size:
+                    new_uuid = uuid.uuid4() 
+                    print('new_uuid ------------',new_uuid)
+            
+                    split_media_name = str(media).split('.',1)[0]
+                    print('split_media_name ----',split_media_name)
+
+                    split_media_name = new_uuid
+                    media_uuid = split_media_name
+                    storage = FileSystemStorage(location='temp_location/')
+                    converted_uuid = storage.save(media_uuid, media)
+                    print('temp_location_path --', converted_uuid)
+                    upload_data.append(converted_uuid)
+                    print('----------------------- uuid created for media_upload_data ----------------------')
+
+                else:
+                    return Response({"response": False, "return_code":"Failed", "result": {}, "message": "Wrong MIME-TYPE or MAXIMUM file size allowed 5MB"},  status=status.HTTP_404_NOT_FOUND)
+
+
+            #return Response({"Status": "Success", "UUID": upload_data}, status=status.HTTP_200_OK)
+            return Response({"response": True, "return_code": "success", "result": {"media_uploaded_uuid":upload_data}, "message": success["success"]},  status=status.HTTP_200_OK)
+        
+        #return Response({"Status":"Failed", "Error":"No Data Found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"response": False, "return_code":"Failed", "result": {}, "message": "No Data Found"},  status=status.HTTP_404_NOT_FOUND)
+
+
+# --------------------------------------------------------------- media_move()  22_07_2022
+def media_move(request):
+
+        #received_image=request.get('image')
+        received_name=request.get('media_name')
+        print('name ----------->',received_name)
+
+        received_uuid = request.get('media_uuid')
+        print('uuid ----------->',received_uuid)
+
+        received_content_type = request.get('media_content_type')
+        print('content type --->',received_content_type)
+
+        received_post_id = request.get('post_id')
+        print('Post Id -------->',received_post_id)
+
+        received_user_id = request.get('user_id')
+        print('User Id -------->',received_user_id)
+
+        post_data = []
+        flag = False
+        # Get user_id value from session_key  # user_login must required to get a value from a session key 'jay_uid'
+        # received_uid = request.session.get('jay_uid')
+        # print('user-id (PostMedia) ->', received_uid)
+        # print("User_ID from session ----------->",uid)
+        #received_uid = received_user_id
+        
+        
+        if received_user_id is not None and received_uuid is not None:
+            try:
+                #new_path = ("path"+'/'+str(received_user_id)+'/'+str(received_post_id))
+                new_path = os.path.join('media', 'post_media_content', str(received_user_id), str(received_post_id))
+                #new_path = os.path.join('media', 'post_media_content', str(received_user_id))
+                print('new_path ------------->', new_path)
+          
+                if os.path.isdir(new_path):
+                    print("path is available")
+                    destination_path = new_path+'/'
+                    print('if_destination_path ---', destination_path)
+
+                else:
+                    print("path is not available, create a new path")
+                    #os.mkdir(new_path)
+                    # from pathlib import Path
+                    # Path("/media/post_media_content/").mkdir(parents=False, exist_ok=True)
+                    # Path("/media/post_media_content/").mkdir(parents=True, exist_ok=True)
+                    os.makedirs(new_path)
+                    destination_path = new_path+'/'
+                    print('else_destination_path --', destination_path)
+
+            except Exception as e:
+                return Response({"response": False, "return_code": "Failed", "result":{}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+                
+        else:
+            #return Response({"response": False, "return_code": "Failed", "result": {"user":"uid not found"}},  status=status.HTTP_404_NOT_FOUND)
+            response = {"flag":flag, "response": False, "return_code": "Failed", "result": {}, "message":errors["no_uuid_user_id"]}
+            return response
+
+        source_path = "temp_location/"
+        #destination_path = "media/images/"
+        dir_list = os.listdir(source_path)
+        print('get_data->',dir_list)
+
+        # for id in dir_list:
+       
+        if received_uuid in dir_list:
+           
+            try:
+                print('id -->' , received_uuid)
+                shutil.move(source_path + received_uuid, destination_path + received_uuid)
+                print('--- UUID MOVE ---')
+                post_data.append(received_uuid)
+                flag = True
+
+            except Exception as e:
+                #transaction.set_rollback(True) # if any error in DB SAVE or UUID MOVE the all transction will rollback().
+                #return Response({"Status":"Failed", "Error":str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+                return Response({"response": False, "return_code": "Failed", "result": {}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            
+            if flag:
+                print('----------------------- Media Move Successfully ----------------------')
+                response = {"flag":flag, "message":post_data }
+                return response
+
+            else:
+                print('------------------------- Media Move Failed --------------------------')
+                response = {"flag":flag, "message":"Media Move Failed"}
+                return response
+                
+        else:
+            #return Response({"response": False, "return_code": "Failed", "result": {}, "message":"No UUID Found"},  status=status.HTTP_404_NOT_FOUND)
+            response = {"flag":flag, "response": False, "return_code": "Failed", "message":"UUID Not Found"}
+            return response
+
+
+# ----- Failed Transaction Directory Remove 25_07_2022
+def dir_remove(user_id, post_id):
+    dir = post_id
+    print('dir -----------', dir)
+    path = os.path.join('media', 'post_media_content', str(user_id))
+    print('path ----------', path)
+    delete_path = os.path.join(path, str(dir))
+    print('delete_path ---', delete_path)
+    shutil.rmtree(delete_path, ignore_errors=False)
+    #os.remove(delete_path)
+    print(f'Deleted Directory Name: {dir}')
+    return True
+
+
+
+
+# ------- Modified 22_07_2022
+class PostCreateViewSet(viewsets.ViewSet):
+    serializer_class = PostSerializer
+
+    @transaction.atomic
+    def create(self, request):
+        received_data = request.data     # JWT Token
+        print(received_data)
+
+        user_id = request.data["created_by"]
+        try:
+            user_data = User.objects.get(id=user_id)
+            user_id = user_data.id
+        except Exception as e:
+            return Response({"response": False, "return_code":"user_not_exist",  "result": {}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+        new_post = Post.objects.create(created_by=user_data)
+        new_post.save()
+
+        post_id = new_post.id
+
+        language_queryset = request.data["languages"]
+        #print('language_length', language_queryset)
+        for language_data in language_queryset:
+            language_choice = language_data.get('language_choice')  #language_data['language_choice']
+            print("language_choice ----", language_choice)
+            description =  language_data.get('description')     #language_data['description']
+            print("description --------", description)
+            medias = language_data.get("medias")
+            print("medias -------------", medias)
+
+            if description is not None or medias is not None:
+                    
+                # post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+                # post_language_obj.save()
+
+                try:
+                    post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+                    post_language_obj.save()
+                    post_lang_id = post_language_obj.id
+
+                except Exception as e:
+                    transaction.set_rollback(True)
+                    return Response({"response": False, "return_code": "Failed", "result": {}, "message":str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    
+
+                #media_datas = language_data["medias"]
+                #print("received_media's_from_user : ",media_datas)
+
+                if language_data.get("medias"):
+                    print('-------- Inside Media ---------')
+                    media_datas = language_data["medias"]
+                    for media_data in media_datas:
+                        print('media_data ------------', media_data)
+                        name = media_data["media_name"]
+                        print('media_name ------------', name)
+                        uuid = media_data["media_uuid"]
+                        print('media_uuid ------------', uuid)
+                        content_type = media_data["media_content_type"]
+                        print('media_content_type ----', content_type)
+                        received_media_move = media_move({"media_name":name,"media_uuid":uuid,"media_content_type":content_type, "post_id":post_id, "user_id":user_id})
+                        print("received_media_move -->",received_media_move)
+ 
+                        # media_url = uuid +'.'+content_type
+                        # print("get_media_url -->",media_url)
+                        
+                        if received_media_move['flag']:     
+                            language_media_obj = LanguageMedia.objects.create(post_language_id=post_lang_id, media_uuid=uuid, media_name=name, media_content_type=content_type, user_id=user_id)
+                            language_media_obj.save()
+                    
+                            print("LanguageMedia DB Entry Saved")
+                
+                        else:
+                            transaction.set_rollback(True)
+
+                            path_verify = os.path.join('media', 'post_media_content', str(user_id), str(post_id))
+                            if os.path.isdir(path_verify):
+                                dir = dir_remove(user_id, post_id)
+                                print("Directory Removed --", dir)
+                            print("LanguageMedia DB Entry Failed (Because media_move() Failed)")
+                            
+
+            else:
+                return Response({"response": False, "return_code": "Failed", "result":{}, "message": "Failed"},  status=404)
+
+        
+        return Response({"response": True, "return_code": "post_create", "result": {"send data as a response here..."}, "message": "success"},  status=200)
+
+
+
+# In [2]: c1 = Customer(cus_name="Joan Louji", cus_email="sjlouji10@gmail.com", cus_mobile="927347234")
+# In [3]: c1.save()
+
+# In [9]: p1 = Products(cus_name="Iphone", cus_qty="3")
+# In [10]: p1.save()
+# In [11]: p1.cus_id.add(c1)
+# In [14]: p1.save()
+# In [15]: cus = Customer.objects.all()
+# In [16]: pro = Products.objects.all()
+# In [17]: cus.values()
+# p1.cus_id.all().values()
+
+
+# my_case
+# likes_obj.user_id.all().values()
+
+# ------------------------------------------------------------------------------ likes() 27_07_2022
+@api_view(['POST'])
+def media_likes(request):
+    data = request.data     
+    print(data)
+
+    user_id = data.get('created_by')
+    print('user_id --------------', user_id)
+    post_language_id=data.get('post_language_id')
+    print('post_language_id -----', post_language_id)
+    # is_liked=data.get('is_liked')
+    # print('is_liked -------------', is_liked)
+
+    if user_id is not None and post_language_id is not None:
+        user_id = User.objects.get(id=user_id)
+        post_language_id = PostInLanguages.objects.get(id=post_language_id)
+
+        # is_obj_available = Likes.objects.filter(user_id = user_id, post_language_id=post_language_id).exists()
+        is_obj_available = Post_Language_Like.objects.filter(user= user_id, post_language=post_language_id).exists()
+        print("is_obj_available -------->", is_obj_available)
+
+        #File.objects.filter(users=GalaxyUser.objects.get(id=1))
+        #all_likes_values = Likes.objects.filter(user_id=user_id)
+        #all_likes_values = Likes.objects.filter(user_id=user_id)
+        #print('all_likes_values --', all_likes_values)
+
+        #User.videos.through.objects.all()
+        #print((Likes.user_id.through.objects.all()).values())
+
+
+        if is_obj_available:
+            # is_likes_true = Likes.objects.get(user_id=user_id, post_language_id=post_language_id)
+            #print("data --", is_likes_true.user_id.all().values())
+            is_likes_true = Post_Language_Like.objects.get(user_id=user_id, post_language_id=post_language_id)
+            is_likes_true.delete()
+            return Response({"response": True, "return_code": "success", "result":{"user's dislike"}, "message": "user removed successfully"},  status=200)
+            #print("is_likes_true -->" ,is_likes_true.is_liked)
+            #flag = is_likes_true.is_liked
+            
+            # if flag is False:
+            #     print("flag is false")
+            #     is_likes_true.is_liked = True
+            #     is_likes_true.save()
+            #     print("user's like")
+            #     return Response({"response": True, "return_code": "success", "result":{"user's like"}, "message": "success"},  status=200)
+
+            # else:
+            #     print("flag is true")
+            #     is_likes_true.is_liked = False
+            #     is_likes_true.save()
+            #     print("user's dislike")
+            #     return Response({"response": True, "return_code": "success", "result":{"user's dislike"}, "message": "success"},  status=200)
+                
+        else:
+            #likes_obj = Likes(user_id = user_id, language_media_id=language_media_id, is_liked=is_liked)
+            #likes_obj = Likes(post_language_id=post_language_id)
+            #likes_obj.save()
+            #likes_obj.user_id.add(user_id)
+            #likes_obj.save()
+            likes_obj = Post_Language_Like(user=user_id, post_language=post_language_id)
+            likes_obj.save()
+            print("likes_obj created")
+        return Response({"response": True, "return_code": "success", "result":{"likes_obj created"}, "message": "success"},  status=200)
+
+    else:
+        return Response({"response": False, "return_code": "Failed", "result":{}, "message": "user_id or language_media_id Not Found"},  status=404)
+
+       
+
+
+
+# ------------------------------------------------------------------------------ likes() 27_07_2022
+# @api_view(['POST'])
+# def media_likes(request):
+    # data = request.data     
+    # print(data)
+
+    # user_id = data.get('created_by')
+    # print('user_id --------------', user_id)
+    # language_media_id=data.get('language_media_id')
+    # print('language_media_id ----', language_media_id)
+    # is_liked=data.get('is_liked')
+    # print('is_liked -------------', is_liked)
+
+    # if user_id is not None and language_media_id is not None:
+    #     user_id = User.objects.get(id=user_id)
+    #     language_media_id = LanguageMedia.objects.get(id=language_media_id)
+
+    #     is_obj_available = Likes.objects.filter(user_id = user_id, language_media_id=language_media_id).exists()
+    #     print("is_obj_available -------->", is_obj_available)
+
+    #     if is_obj_available:
+    #         is_likes_true = Likes.objects.get(user_id=user_id, language_media_id=language_media_id)
+    #         print("is_likes_true -->" ,is_likes_true.is_liked)
+    #         flag = is_likes_true.is_liked
+            
+    #         if flag is False:
+    #             print("flag is false")
+    #             is_likes_true.is_liked = True
+    #             is_likes_true.save()
+    #             print("user's like")
+    #             return Response({"response": True, "return_code": "success", "result":{"user's like"}, "message": "success"},  status=200)
+
+    #         else:
+    #             print("flag is true")
+    #             is_likes_true.is_liked = False
+    #             is_likes_true.save()
+    #             print("user's dislike")
+    #             return Response({"response": True, "return_code": "success", "result":{"user's dislike"}, "message": "success"},  status=200)
+                
+    #     else:
+    #         likes_obj = Likes(user_id = user_id, language_media_id=language_media_id, is_liked=is_liked)
+    #         #likes_obj = Likes(user_id = user_id, language_media_id=language_media_id)
+    #         likes_obj.save()
+    #         print("likes_obj created")
+    #     return Response({"response": True, "return_code": "success", "result":{"likes_obj created"}, "message": "success"},  status=200)
+
+    # else:
+    #     return Response({"response": False, "return_code": "Failed", "result":{}, "message": "user_id or language_media_id Not Found"},  status=404)
+
+       
+       
+       
+       
+       
+       
+       
+        #except User.DoesNotExist:
+        # except Exception as e:
+        #     print("Exception -->",e)
+        #     return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message":str(e)},  status=status.HTTP_400_BAD_REQUEST)
+
+
+        #        try:
+        #             if move_media['Flag']:      
+        #                 lang_media = LanguageMedia.objects.create(media_in_languages_id=lang_obj_get_id, medias_uuid=medias_uuid, media_name=media_name, medias_type=medias_type,media_url=media_url, user_id=user_id)
+        #                 lang_media.save()
+        #                 print("DB Save")
+        #         except Exception as e:
+        #             return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": str(e)},  status=status.HTTP_400_BAD_REQUEST)
+        # except user.DoesNotExist:
+        #     return Response({"response": False, "return_code": "user_not_exist", "result": {}, "message": errors["user_not_exist"]},  status=status.HTTP_400_BAD_REQUEST)
+        # else:
+        #     return Response({"response": False, "return_code": "bad_request", "result": {}, "message": "bad request try again...."},  status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
+
+
+# --------------------------------------------------------------- file_post() --- user_id and post_id -----------------
+# @transaction.atomic  
+# @api_view(['GET', 'POST',])
+# def file_post(request):
+
+#     if request.method == 'POST':
+
+#         received_image=request.POST.get('image')
+#         print('upload image name --->',received_image)
+#         received_uuid = request.POST.get('uuid')
+#         print('uuid name ----------->',received_uuid)
+#         received_content_type = request.POST.get('content_type')
+#         print('content type -------->',received_content_type)
+#         post_data = []
+#         flag = False
+#         # Get user_id value from session_key  # user_login must required to get a value from a session key 'jay_uid'
+#         received_uid = 100  #request.session.get('jay_uid')
+#         print('user-id (PostMedia) ->', received_uid)
+#         # print("User_ID from session ----------->",uid)
+
+#         try:
+#             if received_uid is not None:
+#                 post_id = 12
+#                 print('post-id (PostMedia) ->', post_id)
+#                 new_path = os.path.join('media', 'post_media_content', str(received_uid), str(post_id))
+#                 print('new_path ----->', new_path)
+
+#                 # from pathlib import Path
+#                 # Path("/media/post_media_content/").mkdir(parents=False, exist_ok=True)
+  
+#                 # Path("/media/post_media_content/").mkdir(parents=True, exist_ok=True)
+#                 if os.path.isdir(new_path):
+#                     print("path is available")
+#                     destination_path = new_path+'/'
+#                     print('if_destination_path -', destination_path)
+
+#                 else:
+#                     print("path is not available")
+#                     os.makedirs(new_path)
+#                     destination_path = new_path+'/'
+#                     print('else_destination_path -', destination_path)
+#             else:
+#                 return Response({"response": False, "return_code": "Failed00", "result": {"user":"uid not found"}},  status=status.HTTP_404_NOT_FOUND)
+
+#         except Exception as e:
+#             return Response({"response": False, "return_code": "Failed11", "result": {"user":"path not found"}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+#         source_path = "temp_location/"
+#         #destination_path = "media/images/"
+#         dir_list = os.listdir(source_path)
+#         print('get_data->',dir_list)
+
+#         for id in dir_list:
+#             if id == received_uuid:
+#                 print('id -->' , id)
+#                 new_data = Post_Media()
+#                 new_data.uuid = id
+#                 new_data.image_name = received_image
+#                 new_data.content_type = received_content_type
+#                 new_data.user_id = received_uid
+#                 try:
+#                     new_data.save()
+#                     print('---- DB SAVE ----')
+#                     shutil.move(source_path + id, destination_path + id)
+#                     print('--- UUID MOVE ---')
+#                     post_data.append(id)
+#                     flag = True
+#                 except Exception as e:
+#                     transaction.set_rollback(True) # if any errror in DB SAVE or UUID MOVE the all transction will rollback().
+#                     #return Response({"Status":"Failed", "Error":str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+#                     return Response({"response": False, "return_code": "Failed33", "result": {}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                
+#                 if flag:
+#                     print('----------------------- post created ----------------------')
+#                     #return Response({"Status": "Success", "Detail":"Post Created"}, status=status.HTTP_200_OK)
+#                     return Response({"response": True, "return_code": "success", "result": {"post_data": post_data}, "message": success["success"]},  status=status.HTTP_200_OK)
+            
+#             # else:
+#             #     #return Response({"Status":"Failed", "Error":"No UUID Found"}, status=status.HTTP_404_NOT_FOUND)
+#             #     return Response({"response": False, "return_code": "Failed22", "result": {}, "message":"No UUID Found"},  status=status.HTTP_404_NOT_FOUND)
+
+#         else:
+#             return Response({"response": False, "return_code":"Failed44", "result": {}, "message": "No Data Found"},  status=status.HTTP_404_NOT_FOUND)
+#             #return Response({"Status":"Failed", "Error":"No Data Found"}, status=status.HTTP_404_NOT_FOUND)
+
+# -------------------- 21_07_2022 ----------
+# def file_post(request):
+
+#         received_image=request.get('image')
+#         print('upload image name --->',received_image)
+#         received_uuid = request.get('uuid')
+#         print('uuid name ----------->',received_uuid)
+#         received_content_type = request.get('content_type')
+#         print('content type -------->',received_content_type)
+#         received_post_id = request.get('post_id')
+#         print('Post Id -------->',received_post_id)
+#         received_user_id = request.get('user_id')
+#         print('User Id -------->',received_user_id)
+#         post_data = []
+#         flag = False
+#         # Get user_id value from session_key  # user_login must required to get a value from a session key 'jay_uid'
+#         # received_uid = request.session.get('jay_uid')
+#         # print('user-id (PostMedia) ->', received_uid)
+#         # print("User_ID from session ----------->",uid)
+#         received_uid = received_user_id
+        
+#         try:
+#             if received_uid is not None:
+#                 new_path = ("media/post_media_content"+'/'+str(received_uid))
+#                 print('new_path ----->', new_path)
+          
+#                 if os.path.isdir(new_path):
+#                     print("path is available")
+#                     destination_path = new_path+'/'
+#                     print('if_destination_path -', destination_path)
+
+#                 else:
+#                     print("path is not available")
+#                     os.mkdir(new_path)
+#                     destination_path = new_path+'/'
+#                     print('else_destination_path -', destination_path)
+#             else:
+#                 return Response({"response": False, "return_code": "Failed00", "result": {"user":"uid not found"}},  status=status.HTTP_404_NOT_FOUND)
+
+#         except Exception as e:
+#             return Response({"response": False, "return_code": "Failed11", "result": {"user":"path not found"}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+#         source_path = "temp_location/"
+#         #destination_path = "media/images/"
+#         dir_list = os.listdir(source_path)
+#         print('get_data->',dir_list)
+
+#         for id in dir_list:
+#             if id == received_uuid:
+#                 print('id -->' , id)
+#                 try:
+#                     shutil.move(source_path + id, destination_path + id)
+#                     print('--- UUID MOVE ---')
+#                     post_data.append(id)
+#                     flag = True
+
+#                 except Exception as e:
+#                     # transaction.set_rollback(True) # if any error in DB SAVE or UUID MOVE the all transction will rollback().
+#                     #return Response({"Status":"Failed", "Error":str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+#                     return Response({"response": False, "return_code": "Failed33", "result": {}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                
+#                 if flag:
+#                     print('----------------------- post created ----------------------')
+#                     #return Response({"Status": "Success", "Detail":"Post Created"}, status=status.HTTP_200_OK)
+#                     # return Response({"response": True, "return_code": "success", "result": {"post_data": post_data}, "message": success["success"]},  status=status.HTTP_200_OK)
+#                     return post_data
+            
+#             else:
+#                 #return Response({"Status":"Failed", "Error":"No UUID Found"}, status=status.HTTP_404_NOT_FOUND)
+#                 return Response({"response": False, "return_code": "Failed22", "result": {}, "message":"No UUID Found"},  status=status.HTTP_404_NOT_FOUND)
+
+#         else:
+#             return Response({"response": False, "return_code":"Failed44", "result": {}, "message": "No Data Found"},  status=status.HTTP_404_NOT_FOUND)
+#             #return Response({"Status":"Failed", "Error":"No Data Found"}, status=status.HTTP_404_NOT_FOUND)
+            
+
+
+# ---------------------------------------------------------------------------------------------- 25_07_2022 06:24 PM
+# def media_move(request):
+
+#         received_name=request.get('media_name')
+#         received_uuid = request.get('media_uuid')
+#         received_content_type = request.get('media_content_type')
+#         received_post_id = request.get('post_id')
+#         received_user_id = request.get('user_id')
+#         post_data = []
+#         flag = False
+      
+        
+#         if received_user_id is not None and received_uuid is not None:
+#             try:
+#                 new_path = os.path.join('media', 'post_media_content', str(received_user_id), str(received_post_id))
+                         
+#                 if os.path.isdir(new_path):
+#                     print("path is available")
+#                     destination_path = new_path+'/'
+#                     print('if_destination_path ---', destination_path)
+
+#                 else:
+#                     print("path is not available, create a new path")
+#                     os.makedirs(new_path)
+#                     destination_path = new_path+'/'
+#                     print('else_destination_path --', destination_path)
+
+#             except Exception as e:
+#                 return Response({"response": False, "return_code": "Failed", "result":{}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+                
+#         else:
+#             response = {"flag":flag, "response": False, "return_code": "Failed", "result": {}, "message":errors["no_uuid_user_id"]}
+#             return response
+
+#         source_path = "temp_location/"
+#         dir_list = os.listdir(source_path)
+#         print('get_data->',dir_list)
+
+#         if received_uuid in dir_list:
+           
+#             try:
+#                 print('id -->' , received_uuid)
+#                 shutil.move(source_path + received_uuid, destination_path + received_uuid)
+#                 print('--- UUID MOVE ---')
+#                 post_data.append(received_uuid)
+#                 flag = True
+
+#             except Exception as e:
+#                 return Response({"response": False, "return_code": "Failed", "result": {}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            
+#             if flag:
+
+#                 response = {"flag":flag, "message":post_data }
+#                 return response
+
+#             else:
+#                 response = {"flag":flag, "message":"Media Move Failed"}
+#                 return response
+                
+#         else:
+#             response = {"flag":flag, "response": False, "return_code": "Failed", "message":"UUID Not Found"}
+#             return response
+
+# def dir_remove(user_id, post_id):
+#     path = os.path.join('media', 'post_media_content', str(user_id))
+#     delete_path = os.path.join(path, str(post_id))
+#     shutil.rmtree(delete_path, ignore_errors=False)
+#     print(f'Deleted Directory Name: {dir}')
+#     return True
+
+# class PostCreateViewSet(viewsets.ViewSet):
+#     serializer_class = PostSerializer
+
+#     @transaction.atomic
+#     def create(self, request):
+#         data = request.data      
+#         print(data)
+
+#         user_id_data = request.data["created_by"]
+
+#         try:
+#             user = User.objects.get(id=user_id_data)
+#         except Exception as e:
+#             return Response({"response": False, "return_code":"user_not_exist",  "result": {}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+#         new_post = Post.objects.create(created_by=user)
+#         new_post.save()
+
+#         user_id = user.id
+#         post_id = new_post.id
+
+#         language_queryset = request.data["languages"]
+#         #print('language_length', language_queryset)
+#         for language_data in language_queryset:
+#             language_choice = language_data['language_choice']
+#             description = language_data['description']
+
+#             try:
+#                 post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+#                 post_language_obj.save()
+
+#             except Exception as e:
+#                 transaction.set_rollback(True)
+#                 return Response({"response": False, "result": {" PostInLanguages Object Create Failed "}, "message": str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+   
+        
+#             lang_obj_get_id = post_language_obj.id
+
+#             media_datas = language_data["medias"]
+#             print("received_media's_from_user : ",media_datas)
+
+#             for media_data in media_datas:
+#                 name = media_data["media_name"]
+#                 uuid = media_data["media_uuid"]
+#                 content_type = media_data["media_content_type"]
+
+#                 received_media_move = media_move({"media_name":name,"media_uuid":uuid,"media_content_type":content_type, "post_id":post_id, "user_id":user_id})
+#                 print("received_media_move -->",received_media_move)
+
+                
+#                 if received_media_move['flag']:     
+#                     language_media_obj = LanguageMedia.objects.create(media_in_languages_id=lang_obj_get_id, media_uuid=uuid, media_name=name, media_content_type=content_type, user_id=user_id)
+#                     language_media_obj.save()
+            
+#                     print("LanguageMedia DB Entry Saved")
+        
+#                 else:
+#                     transaction.set_rollback(True)
+#                     path_verify = os.path.join('media', 'post_media_content', str(user_id), str(post_id))
+#                     if os.path.isdir(path_verify):
+#                         dir = dir_remove(user_id, post_id)
+#                         print("Directory Removed --", dir)
+                    
+#                     print("LanguageMedia DB Entry Failed (Because media_move() Failed)")
+#                     return Response({"response": False, "return_code": "Failed", "result": received_media_move['message'], "message":"media_move() Failed"},  status=status.HTTP_400_BAD_REQUEST) 
+
+#             return Response({"response": True, "return_code": "post_create", "result": "LanguageMedia DB Entry Saved", "message": "success"},  status=200)
+       
+       
+
+# ---------------------------------------------------------------------------------------------- 26_07_2022 05:04 PM      
+# class PostCreateViewSet(viewsets.ViewSet):
+#     serializer_class = PostSerializer
+
+#     @transaction.atomic
+#     def create(self, request):
+#         data = request.data      # JWT Token (Future)
+#         user_id_data = request.data["created_by"]
+#         try:
+#             user = User.objects.get(id=user_id_data)
+#             user_id = user.id
+#         except Exception as e:
+#             return Response({"response": False, "return_code":"user_not_exist",  "result": {}, "message": str(e)},  status=status.HTTP_404_NOT_FOUND)
+
+#         new_post = Post.objects.create(created_by=user)
+#         new_post.save()
+#         post_id = new_post.id
+
+#         language_queryset = request.data["languages"]
+#         for language_data in language_queryset:
+#             language_choice = language_data.get('language_choice')
+#             description =  language_data.get('description')    
+#             medias = language_data.get("medias")
+#             if description is not None or medias is not None:
+#                 try:
+#                     post_language_obj = PostInLanguages.objects.create(post_id=post_id, language_choice_id=language_choice, description=description)
+#                     post_language_obj.save()
+#                     lang_obj_get_id = post_language_obj.id
+#                 except Exception as e:
+#                     transaction.set_rollback(True)
+#                     return Response({"response": False, "return_code": "Failed", "result": {}, "message":str(e)},  status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+             
+#                 if language_data.get("medias"):
+#                     media_datas = language_data["medias"]
+#                     for media_data in media_datas:
+#                         name = media_data["media_name"]
+#                         uuid = media_data["media_uuid"]
+#                         content_type = media_data["media_content_type"]
+
+#                         received_media_move = media_move({"media_name":name,"media_uuid":uuid,"media_content_type":content_type, "post_id":post_id, "user_id":user_id})
+#                         print("received_media_move -->",received_media_move)
+                        
+#                         if received_media_move['flag']:     
+#                             language_media_obj = LanguageMedia.objects.create(media_in_languages_id=lang_obj_get_id, media_uuid=uuid, media_name=name, media_content_type=content_type, user_id=user_id)
+#                             language_media_obj.save()
+#                             print("LanguageMedia DB Entry Saved")
+                
+#                         else:
+#                             transaction.set_rollback(True)
+#                             path_verify = os.path.join('media', 'post_media_content', str(user_id), str(post_id))
+#                             if os.path.isdir(path_verify):
+#                                 dir = dir_remove(user_id, post_id)
+#                             print("LanguageMedia DB Entry Failed (Because media_move() Failed)")
+                           
+#             else:
+#                 return Response({"response": False, "return_code": "Failed", "result":{}, "message": "Description or Media Not Found"},  status=404)
+     
+#         return Response({"response": True, "return_code": "post_create", "result": {"send data as a response here..."}, "message": "success"},  status=200)
