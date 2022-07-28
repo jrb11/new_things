@@ -4,7 +4,8 @@ class Likes(models.Model):
     user_id = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
     language_media_id = models.ForeignKey(LanguageMedia, null=False, on_delete=models.CASCADE)
    
-     
+@api_view(['POST'])
+def media_likes(request):     
     print(data)
 
     user_id = data.get('created_by')
@@ -50,4 +51,12 @@ class Likes(models.Model):
     else:
         return Response({"response": False, "return_code": "Failed", "result":{}, "message": "user_id or language_media_id Not Found"},  status=404)
 
-       
+ #postman api -POST
+ http://127.0.0.1:8000/api/media_likes/
+ 
+ input text/json
+ {
+    "created_by": 40,
+    "language_media_id": 33,
+    "is_liked": "True"
+}
