@@ -1,0 +1,53 @@
+class Likes(models.Model):
+    id = models.AutoField(primary_key=True)
+    is_liked = models.BooleanField()
+    user_id = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
+    language_media_id = models.ForeignKey(LanguageMedia, null=False, on_delete=models.CASCADE)
+   
+     
+    print(data)
+
+    user_id = data.get('created_by')
+    print('user_id --------------', user_id)
+    language_media_id=data.get('language_media_id')
+    print('language_media_id ----', language_media_id)
+    is_liked=data.get('is_liked')
+    print('is_liked -------------', is_liked)
+
+    if user_id is not None and language_media_id is not None:
+        user_id = User.objects.get(id=user_id)
+        language_media_id = LanguageMedia.objects.get(id=language_media_id)
+
+        is_obj_available = Likes.objects.filter(user_id = user_id, language_media_id=language_media_id).exists()
+        print("is_obj_available -------->", is_obj_available)
+
+        if is_obj_available:
+            is_likes_true = Likes.objects.get(user_id=user_id, language_media_id=language_media_id)
+            print("is_likes_true -->" ,is_likes_true.is_liked)
+            flag = is_likes_true.is_liked
+            
+            if flag is False:
+                print("flag is false")
+                is_likes_true.is_liked = True
+                is_likes_true.save()
+                print("user's like")
+                return Response({"response": True, "return_code": "success", "result":{"user's like"}, "message": "success"},  status=200)
+
+            else:
+                print("flag is true")
+                is_likes_true.is_liked = False
+                is_likes_true.save()
+                print("user's dislike")
+                return Response({"response": True, "return_code": "success", "result":{"user's dislike"}, "message": "success"},  status=200)
+                
+        else:
+            likes_obj = Likes(user_id = user_id, language_media_id=language_media_id, is_liked=is_liked)
+            #likes_obj = Likes(user_id = user_id, language_media_id=language_media_id)
+            likes_obj.save()
+            print("likes_obj created")
+        return Response({"response": True, "return_code": "success", "result":{"likes_obj created"}, "message": "success"},  status=200)
+
+    else:
+        return Response({"response": False, "return_code": "Failed", "result":{}, "message": "user_id or language_media_id Not Found"},  status=404)
+
+       
