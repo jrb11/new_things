@@ -1,0 +1,31 @@
+class OptionsSerializer(serializers.ModelSerializer):
+    percentage_count = serializers.SerializerMethodField()
+    class Meta:
+        model = Options
+        fields = ('id', 'poll_id', 'poll_option_id', 'option_text', 'percentage_count')
+    def get_percentage_count(self, obj):
+        print('obj:-------------------', obj)
+        print('obj_post_id:-----------', obj.post_id)
+        print('obj_poll_id:-----------', obj.poll_id)
+        print('obj_poll_option_id:----', obj.poll_option_id)
+        total_post_votes = Vote.objects.filter(post_id=obj.post_id).count()
+        print('obj_post_count:--------',total_post_votes)
+        try:
+            vote_results = Options.objects.select_related('vote').filter(post_id=obj.post_id).values_list('poll_option_id').annotate(Total = Count('vote__option_id'))
+            print('vote_results:----------',vote_results)
+        except Exception as e:
+            return Response({"response": False, "return_code": "vote_results_failed", "result": "Failed", "message": str(e)},  status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            per_obj = list(map(lambda j :{'id': j[0],'per': Decimal((j[1] / total_post_votes) * 100).quantize(Decimal('.01'))}, list(map(lambda i:list(i), vote_results))))
+            percentage = [i['per'] for i in per_obj if obj.poll_option_id == i['id']]
+            return percentage[0]
+        except ZeroDivisionError:
+            return 0 
+        
+# 23/09/22 ---------------------------------------------------------------------------------------------------------------------------
+class PollsSerializer(serializers.ModelSerializer):
+    options_data = OptionsSerializer(many=True, read_only=True)
+    class Meta:
+        model = Polls
+        fields = ('id','user_id', 'question', 'created_on', 'active',  'options_data')
