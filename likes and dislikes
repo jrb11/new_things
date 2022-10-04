@@ -10,6 +10,7 @@ def media_likes(request):
 
     user_id = data.get('created_by')
     print('user_id --------------', user_id)
+    print('user_id --------------', user_id)
     language_media_id=data.get('language_media_id')
     print('language_media_id ----', language_media_id)
     is_liked=data.get('is_liked')
